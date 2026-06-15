@@ -1,0 +1,23 @@
+# 虚拟环境
+.venv/
+venv/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# 密钥与本地配置（.env 禁止进 git，仅 .env.example 进库）
+.env
+.env.local
+
+# 日志与临时文件
+*.log
+.DS_Store
+
+# IDE
+.idea/
+.vscode/

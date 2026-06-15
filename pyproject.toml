@@ -1,0 +1,79 @@
+[project]
+name = "omnimind-ai"
+version = "0.1.0"
+description = "OmniMind POC · Python AI 服务（解析 / 向量化 / RAG / 审查 / 编写 Agent）"
+# 注意：spec 强制 3.11；本环境放宽到 >=3.11，便于本机 3.13 直接运行（与用户确认）。
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "sqlalchemy>=2.0",
+  "asyncpg>=0.29",
+  "alembic>=1.13",
+  "pymilvus>=2.4",
+  "minio>=7.2",
+  "openai>=1.30",
+  "dashscope>=1.16",
+  "langgraph>=0.0.50",
+  "pymupdf>=1.24",
+  "python-docx>=1.1",
+  "openpyxl>=3.1",
+  "tiktoken>=0.6",
+  "loguru>=0.7",
+  "httpx>=0.27",
+  "tenacity>=8.2",
+  "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.4",
+  "mypy>=1.10",
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "respx>=0.21",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+# E/F/W 基础；I import 排序；B bugbear；UP pyupgrade；ASYNC 异步反模式；S bandit 安全；RUF
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "S", "RUF"]
+# S101 允许测试中使用 assert；RUF001/002/003 关闭全角标点歧义告警（项目文档全程中文）。
+ignore = ["S101", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试里允许更宽松（assert、硬编码示例值）
+"tests/**" = ["S105", "S106"]
+# 配置默认值均为 "placeholder" 占位符，真实密钥由 .env 注入，非硬编码密钥。
+"app/core/config.py" = ["S105"]
+# INTERNAL_TOKEN_HEADER 是 HTTP 头名常量，非密钥。
+"app/core/security.py" = ["S105"]
+# Severity.PASS 是枚举字面量，非密钥。
+"app/schemas/review.py" = ["S105"]
+
+[tool.mypy]
+python_version = "3.11"
+strict_optional = true
+disallow_untyped_defs = true
+warn_unused_ignores = true
+plugins = ["pydantic.mypy"]
+# 第三方库缺类型存根时不报缺失（dashscope / pymilvus 等无 stub）
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
