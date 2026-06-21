@@ -2,7 +2,7 @@
 
 属 DDL 范畴（与 alembic 迁移并列），单独提供 bootstrap 函数：连接 → 建 collection
 → 建 HNSW/COSINE 索引 → load。运行时检索客户端在 clients 层另行封装。
-向量维度 1024（百炼 text-embedding-v3）；只向量化子块。
+向量维度由 settings.embed_dim 决定（当前百炼 text-embedding-v4, dim=2048）；只向量化子块。
 """
 
 from __future__ import annotations
@@ -21,8 +21,11 @@ from app.core.config import Settings
 _CONN_ALIAS = "bootstrap"
 
 
-def build_schema() -> CollectionSchema:
-    """构建 omnimind_chunks 的字段 schema（spec §Milvus Collection）。"""
+def build_schema(settings: Settings) -> CollectionSchema:
+    """构建 omnimind_chunks 的字段 schema（spec §Milvus Collection）。
+
+    向量维度取 settings.embed_dim，与 embedder 输出维度保持单一真相。
+    """
     fields = [
         FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, auto_id=True),
         FieldSchema(name="chunk_id", dtype=DataType.INT64),
@@ -32,7 +35,7 @@ def build_schema() -> CollectionSchema:
         FieldSchema(name="media_type", dtype=DataType.VARCHAR, max_length=16),
         FieldSchema(name="embedding_ver", dtype=DataType.VARCHAR, max_length=32),
         FieldSchema(name="metadata", dtype=DataType.JSON),
-        FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=1024),
+        FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=settings.embed_dim),
     ]
     return CollectionSchema(fields=fields, description="OmniMind child-chunk vectors")
 
@@ -52,7 +55,7 @@ def ensure_collection(settings: Settings) -> None:
         name = settings.milvus_collection
         if not utility.has_collection(name, using=_CONN_ALIAS):
             collection = Collection(
-                name=name, schema=build_schema(), using=_CONN_ALIAS
+                name=name, schema=build_schema(settings), using=_CONN_ALIAS
             )
             collection.create_index(
                 field_name="embedding",

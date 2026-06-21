@@ -69,11 +69,20 @@ async def get_status(session: AsyncSession, write_task_id: int) -> WriteStatusOu
     )
 
 
-def stream_write(
+def stream_outline(
     clients: Clients, settings: Settings, *, write_task_id: int
 ) -> AsyncIterator[SSEEvent]:
-    """SSE 驱动章节正文流式生成。"""
-    return WriteAgent(clients, settings).stream(write_task_id=write_task_id)
+    """SSE 驱动大纲流（progress/token{node}/done）。"""
+    return WriteAgent(clients, settings).stream_outline(write_task_id=write_task_id)
+
+
+def stream_section(
+    clients: Clients, settings: Settings, *, write_task_id: int, section_id: int
+) -> AsyncIterator[SSEEvent]:
+    """SSE 驱动单章节正文流式生成（token/done）。"""
+    return WriteAgent(clients, settings).stream_section(
+        write_task_id=write_task_id, section_id=section_id
+    )
 
 
 async def save_section(

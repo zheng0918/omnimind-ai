@@ -50,9 +50,13 @@ class VectorStore(Protocol):
         ...
 
     async def search(
-        self, embedding: list[float], top_k: int, kb_ids: list[int]
+        self,
+        embedding: list[float],
+        top_k: int,
+        kb_ids: list[int],
+        embedding_ver: str | None = None,
     ) -> list[SearchHit]:
-        """按知识库范围检索 top_k 个最相似子块。"""
+        """按知识库范围检索 top_k 个最相似子块；embedding_ver 非空时仅匹配该向量版本。"""
         ...
 
     async def delete_by_doc(self, doc_id: int) -> None:
@@ -115,10 +119,19 @@ class MilvusVectorStore:
         return list(result.primary_keys)
 
     async def search(
-        self, embedding: list[float], top_k: int, kb_ids: list[int]
+        self,
+        embedding: list[float],
+        top_k: int,
+        kb_ids: list[int],
+        embedding_ver: str | None = None,
     ) -> list[SearchHit]:
         collection = self._require()
-        expr = f"kb_id in {list(kb_ids)}" if kb_ids else None
+        clauses: list[str] = []
+        if kb_ids:
+            clauses.append(f"kb_id in {list(kb_ids)}")
+        if embedding_ver:
+            clauses.append(f'embedding_ver == "{embedding_ver}"')
+        expr = " and ".join(clauses) if clauses else None
         results = await asyncio.wait_for(
             asyncio.to_thread(
                 collection.search,

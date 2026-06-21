@@ -99,17 +99,35 @@ async def _save_answer(
         return row.id
 
 
+def _parse_doc_refs(doc_refs: str | None) -> list[int]:
+    """解析逗号分隔的 docId 字符串为 int 列表，忽略非法/空项。"""
+    if not doc_refs:
+        return []
+    ids: list[int] = []
+    for part in doc_refs.split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.append(int(part))
+    return ids
+
+
 async def stream_chat(
     clients: Clients,
     settings: Settings,
     *,
     session_id: int,
     query: str,
+    mode: str | None = None,
+    doc_refs: str | None = None,
 ) -> AsyncIterator[SSEEvent]:
     """驱动一轮问答，产出 SSE 事件流并落库 user/assistant 消息。"""
     kb_ids, creative, history = await _load_context(
         session_id, query, settings.rag_history_rounds
     )
+    # 契约 §3.2：请求级 mode 覆盖会话默认；docRefs 限定文档范围
+    if mode is not None:
+        creative = mode == ChatMode.CREATIVE.value
+    doc_ids = _parse_doc_refs(doc_refs)
 
     content_parts: list[str] = []
     citations: list[Citation] = []
@@ -122,6 +140,7 @@ async def stream_chat(
         kb_ids=kb_ids,
         history=history,
         creative=creative,
+        doc_ids=doc_ids,
     ):
         if isinstance(event, TokenEvent):
             content_parts.append(event.text)

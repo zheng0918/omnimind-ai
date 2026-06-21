@@ -1,7 +1,7 @@
 """解析后台任务（REQ-KB-04 全链路）。
 
 MinIO 取原文 → 解析器结构化 → 父子切片 → 子块向量化 → 写 PG + Milvus →
-任务 SUCCESS + 回调 Java。解析失败重试 1 次；最终失败置 FAILED 并回调 FAILED。
+任务 PARSED + 回调 Java。解析失败重试 1 次；最终失败置 FAILED 并回调 FAILED。
 不向调用方泄露堆栈，仅日志记录 trace 级别信息（不记正文）。
 """
 
@@ -57,7 +57,7 @@ async def run_parse(parse_task_id: int, clients: Clients, trace_id: str) -> None
             await parse_task_repo.update_progress(
                 session,
                 task,
-                status="SUCCESS",
+                status="PARSED",
                 progress=100,
                 page_count=parsed.page_count,
                 chunk_count=chunk_count,
@@ -105,7 +105,11 @@ async def _persist_and_index(
         overlap_ratio=settings.chunk_overlap_ratio,
     )
     child_rows = await chunk_repo.persist_chunks(
-        session, document_id=document_id, kb_id=kb_id, parents=parents
+        session,
+        document_id=document_id,
+        kb_id=kb_id,
+        parents=parents,
+        embedding_version=settings.embedding_version,
     )
     if not child_rows:
         return child_rows

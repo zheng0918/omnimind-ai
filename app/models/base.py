@@ -1,8 +1,7 @@
 """ORM 基类与公共列。
 
-所有表归属 omnimind_ai schema（pythonRequirements §二），通过 MetaData.schema
-统一约束，禁止触碰 omnimind_biz。命名约定固定，便于 alembic 自动生成稳定的
-约束/索引名。
+所有表建在独立 omnimind_ai 库的 public schema，通过 MetaData.schema 统一约束。
+命名约定固定，便于 alembic 自动生成稳定的约束/索引名。
 """
 
 from __future__ import annotations
@@ -12,8 +11,9 @@ from datetime import datetime
 from sqlalchemy import BigInteger, DateTime, MetaData, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-# omnimind_ai 是固定的架构常量（非密钥），与 Settings.database_schema 默认值一致。
-SCHEMA = "omnimind_ai"
+# schema 常量（非密钥），与 Settings.database_schema 默认值一致；
+# 已改为独立 omnimind_ai 库 + 默认 public schema。
+SCHEMA = "public"
 
 _NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",
@@ -25,7 +25,7 @@ _NAMING_CONVENTION = {
 
 
 class Base(DeclarativeBase):
-    """声明式基类，绑定 omnimind_ai schema 与命名约定。"""
+    """声明式基类，绑定 public schema 与命名约定。"""
 
     metadata = MetaData(schema=SCHEMA, naming_convention=_NAMING_CONVENTION)
 

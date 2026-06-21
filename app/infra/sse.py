@@ -12,11 +12,23 @@ from app.schemas.sse_events import (
     CitationEvent,
     DoneEvent,
     ErrorEvent,
+    OutlineDoneEvent,
+    OutlineNodeEvent,
     ProgressEvent,
+    SectionDoneEvent,
     TokenEvent,
 )
 
-SSEEvent = TokenEvent | CitationEvent | ProgressEvent | DoneEvent | ErrorEvent
+SSEEvent = (
+    TokenEvent
+    | CitationEvent
+    | ProgressEvent
+    | OutlineNodeEvent
+    | OutlineDoneEvent
+    | SectionDoneEvent
+    | DoneEvent
+    | ErrorEvent
+)
 
 KEEP_ALIVE = ": keep-alive\n\n"
 SSE_MEDIA_TYPE = "text/event-stream"

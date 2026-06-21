@@ -12,7 +12,7 @@ class ParseStatus(StrEnum):
 
     PENDING = "PENDING"
     PARSING = "PARSING"
-    SUCCESS = "SUCCESS"
+    PARSED = "PARSED"
     FAILED = "FAILED"
 
 

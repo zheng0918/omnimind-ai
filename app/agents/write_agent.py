@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-import time
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
@@ -20,12 +20,25 @@ from loguru import logger
 from app.clients.registry import Clients
 from app.core.config import Settings
 from app.core.db import session_scope
-from app.core.errors import CODE_WRITE_TENDER_NOT_PARSED, BizError
+from app.core.errors import (
+    CODE_RESOURCE_NOT_FOUND,
+    CODE_WRITE_SECTION_FAILED,
+    CODE_WRITE_TENDER_NOT_PARSED,
+    BizError,
+)
 from app.infra.sse import SSEEvent
 from app.prompts import v1
 from app.rag.retriever import hybrid_retrieve
 from app.repositories import chunk_repo, write_repo
-from app.schemas.sse_events import DoneEvent, ErrorEvent, ProgressEvent, TokenEvent
+from app.schemas.sse_events import (
+    ErrorEvent,
+    OutlineDoneEvent,
+    OutlineNode,
+    OutlineNodeEvent,
+    ProgressEvent,
+    SectionDoneEvent,
+    TokenEvent,
+)
 
 _MIN_TENDER_CHARS = 50
 _TENDER_PARENT_LIMIT = 40
@@ -33,6 +46,8 @@ _SCORE_POINT_MAX = 30
 _OUTLINE_MATERIAL_BLOCKS = 5
 _SECTION_EVIDENCE_BLOCKS = 4
 _OUTLINE_QUERY_POINTS = 5
+_OUTLINE_POLL_INTERVAL_S = 1.0
+_OUTLINE_POLL_MAX_ATTEMPTS = 180
 
 
 class WriteAgent:
@@ -155,55 +170,110 @@ class WriteAgent:
                     total += 1
         return total
 
-    # ---- stream（SSE）----
+    # ---- outline 流（契约 §1.6 /outline/stream）----
 
-    async def stream(self, *, write_task_id: int) -> AsyncIterator[SSEEvent]:
-        """按大纲顺序逐小节流式生成正文，token 实时下发并落库。"""
-        started = time.monotonic()
-        ctx = await self._load_stream_context(write_task_id)
-        if ctx is None:
-            yield ErrorEvent(code=CODE_WRITE_TENDER_NOT_PARSED, message="编写任务尚未就绪")
+    async def stream_outline(self, *, write_task_id: int) -> AsyncIterator[SSEEvent]:
+        """等待后台 prepare 产出大纲后，按节点增量下发。
+
+        事件序列：progress*（extracting/matching）→ token{node}* → done{totalNodes,matchedMaterials}。
+        """
+        ready = False
+        for _ in range(_OUTLINE_POLL_MAX_ATTEMPTS):
+            snapshot = await self._load_outline_snapshot(write_task_id)
+            if snapshot is None:
+                yield ErrorEvent(code=CODE_RESOURCE_NOT_FOUND, message="编写任务不存在")
+                return
+            status, nodes, point_count = snapshot
+            if status == "FAILED":
+                yield ErrorEvent(
+                    code=CODE_WRITE_TENDER_NOT_PARSED, message="招标解析或大纲规划失败"
+                )
+                return
+            if status in {"GENERATING", "DONE"} and nodes:
+                ready = True
+                break
+            stage = "matching" if status == "MATCHING" else "extracting"
+            yield ProgressEvent(stage=stage, percent=30 if stage == "matching" else 10)
+            await asyncio.sleep(_OUTLINE_POLL_INTERVAL_S)
+
+        if not ready:
+            yield ErrorEvent(code=CODE_WRITE_TENDER_NOT_PARSED, message="大纲规划超时")
             return
-        kb_id, point_texts, project_params, pending = ctx
-        total = len(pending)
 
-        for idx, item in enumerate(pending, start=1):
-            section_id, chapter_title, section_title = item
-            yield ProgressEvent(
-                stage=f"section:{section_id}", percent=int(idx / total * 100)
+        snapshot = await self._load_outline_snapshot(write_task_id)
+        if snapshot is None:
+            yield ErrorEvent(code=CODE_RESOURCE_NOT_FOUND, message="编写任务不存在")
+            return
+        _, nodes, point_count = snapshot
+        yield ProgressEvent(stage="done", percent=100)
+        for node in nodes:
+            yield OutlineNodeEvent(
+                node=OutlineNode(
+                    node_id=node.id,
+                    parent_id=node.parent_id,
+                    title=node.title,
+                    order_idx=node.order_idx,
+                    section_id=node.section_id,
+                )
             )
-            async for event in self._stream_one(
-                kb_id, point_texts, project_params, section_id, chapter_title, section_title
-            ):
-                yield event
+        yield OutlineDoneEvent(total_nodes=len(nodes), matched_materials=point_count)
 
-        await self._finalize(write_task_id)
-        yield DoneEvent(total_ms=int((time.monotonic() - started) * 1000))
-
-    async def _load_stream_context(
+    async def _load_outline_snapshot(
         self, write_task_id: int
-    ) -> tuple[int, list[str], dict[str, str], list[tuple[int, str, str]]] | None:
+    ) -> tuple[str, list, int] | None:
+        async with session_scope() as session:
+            task = await write_repo.get_task(session, write_task_id)
+            if task is None:
+                return None
+            nodes = await write_repo.list_outline(session, write_task_id)
+            point_count = len(await write_repo.list_score_points(session, write_task_id))
+        return task.status, nodes, point_count
+
+    # ---- 单章节流（契约 §1.6 /sections/{sid}/stream）----
+
+    async def stream_section(
+        self, *, write_task_id: int, section_id: int
+    ) -> AsyncIterator[SSEEvent]:
+        """流式生成单个小节正文：token* → done{sectionId,status}。"""
+        ctx = await self._load_section_context(write_task_id, section_id)
+        if ctx is None:
+            yield ErrorEvent(code=CODE_RESOURCE_NOT_FOUND, message="小节不存在或任务未就绪")
+            return
+        kb_id, point_texts, project_params, chapter_title, section_title = ctx
+
+        errored = False
+        async for event in self._stream_one(
+            kb_id, point_texts, project_params, section_id, chapter_title, section_title
+        ):
+            if isinstance(event, ErrorEvent):
+                errored = True
+            yield event
+        if errored:
+            return
+        await self._finalize(write_task_id)
+        yield SectionDoneEvent(section_id=section_id, status="DONE")
+
+    async def _load_section_context(
+        self, write_task_id: int, section_id: int
+    ) -> tuple[int, list[str], dict[str, str], str, str] | None:
         async with session_scope() as session:
             task = await write_repo.get_task(session, write_task_id)
             if task is None or task.status not in {"GENERATING", "DONE"}:
+                return None
+            section = await write_repo.get_section(session, section_id)
+            if section is None or section.write_task_id != write_task_id:
                 return None
             point_texts = [
                 p.point_text for p in await write_repo.list_score_points(session, write_task_id)
             ]
             params = {k: str(v) for k, v in (task.project_params_json or {}).items() if v}
             nodes = {n.id: n for n in await write_repo.list_outline(session, write_task_id)}
-            sections = await write_repo.list_sections(session, write_task_id)
-            pending: list[tuple[int, str, str]] = []
-            for s in sections:
-                if s.status not in {"PENDING", "FAILED"}:
-                    continue
-                node = nodes.get(s.outline_node_id) if s.outline_node_id else None
-                section_title = node.title if node else "正文"
-                parent = nodes.get(node.parent_id) if node and node.parent_id else None
-                chapter_title = parent.title if parent else section_title
-                pending.append((s.id, chapter_title, section_title))
+            node = nodes.get(section.outline_node_id) if section.outline_node_id else None
+            section_title = node.title if node else "正文"
+            parent = nodes.get(node.parent_id) if node and node.parent_id else None
+            chapter_title = parent.title if parent else section_title
             kb_id = task.kb_id
-        return kb_id, point_texts, params, pending
+        return kb_id, point_texts, params, chapter_title, section_title
 
     async def _stream_one(
         self,
@@ -230,7 +300,7 @@ class WriteAgent:
             logger.exception("section generate failed id={}", section_id)
             await self._save_section(section_id, "".join(parts), "FAILED")
             yield ErrorEvent(
-                code=CODE_WRITE_TENDER_NOT_PARSED, message=f"小节生成失败（id={section_id}）"
+                code=CODE_WRITE_SECTION_FAILED, message=f"小节生成失败（id={section_id}）"
             )
             return
         await self._save_section(section_id, "".join(parts), "DONE")

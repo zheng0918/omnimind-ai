@@ -48,7 +48,7 @@ async def get_review(review_task_id: int, session: SessionDep) -> dict[str, Any]
 async def list_risks(
     review_task_id: int,
     session: SessionDep,
-    since_id: Annotated[int, Query(alias="sinceId", ge=0)] = 0,
+    since_id: Annotated[int, Query(alias="since", ge=0)] = 0,
 ) -> dict[str, Any]:
     """增量拉取风险条目（id > sinceId），附带进度与严重度汇总。"""
     result = await review_service.list_risks(session, review_task_id, since_id=since_id)

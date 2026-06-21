@@ -1,5 +1,6 @@
-"""向量化客户端抽象与百炼实现（text-embedding-v3, dim=1024）。
+"""向量化客户端抽象与百炼实现（text-embedding-v4, dim 可配置）。
 
+维度由 settings.embed_dim 决定并显式传给 v4（v4 默认输出 1024，需 dimension 参数才出 2048）。
 百炼单批硬上限 25 段；多批并发受 embed_concurrency 限制（监控 TPM）。
 dashscope SDK 为同步阻塞调用，统一用 asyncio.to_thread 卸载 + wait_for 强制超时。
 """
@@ -66,6 +67,7 @@ class BailianEmbedder:
                     TextEmbedding.call,
                     model=self._model,
                     input=batch,
+                    dimension=self._dim,
                     api_key=self._api_key,
                 ),
                 timeout=self._timeout_s,

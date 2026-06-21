@@ -45,6 +45,39 @@ class ProgressEvent(CamelModel):
     percent: int
 
 
+class OutlineNode(CamelModel):
+    """编写大纲节点（契约 §1.6 outline 流 token 事件载荷）。"""
+
+    node_id: int
+    parent_id: int | None = None
+    title: str
+    order_idx: int
+    section_id: int | None = None
+
+
+class OutlineNodeEvent(CamelModel):
+    """大纲节点增量事件（event:token, data:{node:{...}}）。"""
+
+    type: Literal["token"] = "token"
+    node: OutlineNode
+
+
+class OutlineDoneEvent(CamelModel):
+    """大纲流完成事件（契约 §1.6：totalNodes / matchedMaterials）。"""
+
+    type: Literal["done"] = "done"
+    total_nodes: int
+    matched_materials: int = 0
+
+
+class SectionDoneEvent(CamelModel):
+    """章节流完成事件（契约 §1.6：sectionId / status）。"""
+
+    type: Literal["done"] = "done"
+    section_id: int
+    status: str = "DONE"
+
+
 class DoneEvent(CamelModel):
     """完成事件，携带可观测指标。"""
 

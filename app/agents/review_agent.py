@@ -199,13 +199,20 @@ class ReviewAgent:
         severity = str(result.get("severity", "PASS")).upper()
         if severity not in _VALID_SEVERITY:
             severity = "PASS"
+        risk_type = str(result.get("riskType", item.risk_type))
         confidence = float(result.get("confidence", 0.0))
-        if severity != "PASS" and confidence < state["threshold"]:
+        # 缺失项豁免阈值降级：招标硬性要求确实缺失时检索常召回为空、confidence 偏低，
+        # 若按阈值一并过滤，会把最该暴露的缺失项悄悄改判为 PASS。
+        if (
+            severity != "PASS"
+            and risk_type != "missing"
+            and confidence < state["threshold"]
+        ):
             severity = "PASS"
         top = blocks[0] if blocks else None
         return {
             "severity": severity,
-            "risk_type": str(result.get("riskType", item.risk_type)),
+            "risk_type": risk_type,
             "title": str(result.get("title", item.title)),
             "description": result.get("description"),
             "original_text": result.get("originalText"),

@@ -32,10 +32,20 @@ async def stream_chat(
     clients: ClientsDep,
     session_id: Annotated[int, Query(alias="sessionId")],
     query: Annotated[str, Query(min_length=1)],
+    mode: Annotated[str | None, Query()] = None,
+    doc_refs: Annotated[str | None, Query(alias="docRefs")] = None,
 ) -> StreamingResponse:
-    """SSE 流式问答。"""
+    """SSE 流式问答。
+
+    契约 §3.2：mode 可覆盖会话默认模式；docRefs 为逗号分隔 docId，限定检索范围。
+    """
     events = chat_service.stream_chat(
-        clients, get_settings(), session_id=session_id, query=query
+        clients,
+        get_settings(),
+        session_id=session_id,
+        query=query,
+        mode=mode,
+        doc_refs=doc_refs,
     )
     return StreamingResponse(
         stream_events(events),

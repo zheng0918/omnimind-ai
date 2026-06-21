@@ -15,8 +15,12 @@ async def persist_chunks(
     document_id: int,
     kb_id: int,
     parents: list[ParentChunk],
+    embedding_version: str,
 ) -> list[Chunk]:
-    """插入父块与子块，返回子块 ORM 列表（含 id），供后续向量化与回写 milvus_pk。"""
+    """插入父块与子块，返回子块 ORM 列表（含 id），供后续向量化与回写 milvus_pk。
+
+    子块标记 embedding_version，作为向量版本依据（新旧并存/灰度/回滚按此过滤）。
+    """
     child_rows: list[Chunk] = []
     for parent in parents:
         parent_row = Chunk(
@@ -43,6 +47,7 @@ async def persist_chunks(
                 paragraph_id=parent.paragraph_id,
                 char_offset=parent.char_offset,
                 tokens=child.tokens,
+                embedding_ver=embedding_version,
             )
             session.add(child_row)
             child_rows.append(child_row)

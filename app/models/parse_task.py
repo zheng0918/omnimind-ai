@@ -9,7 +9,7 @@ from app.models.base import Base, IdMixin, TimestampMixin
 
 
 class ParseTask(Base, IdMixin, TimestampMixin):
-    """文档解析任务状态机：PENDING|PARSING|SUCCESS|FAILED。"""
+    """文档解析任务状态机：PENDING|PARSING|PARSED|FAILED。"""
 
     __tablename__ = "parse_tasks"
 

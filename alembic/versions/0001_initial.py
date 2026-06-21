@@ -1,4 +1,4 @@
-"""initial omnimind_ai schema
+"""initial omnimind_ai db schema (public)
 
 Revision ID: 0001_initial
 Revises:
@@ -18,7 +18,7 @@ down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-SCHEMA = "omnimind_ai"
+SCHEMA = "public"
 
 
 def _ts_cols() -> list[sa.Column]:

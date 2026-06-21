@@ -1,4 +1,4 @@
-"""异步数据库引擎与会话工厂（仅 omnimind_ai schema）。
+"""异步数据库引擎与会话工厂（独立 omnimind_ai 库 / public schema）。
 
 engine / session_factory 属于"连接对象"，按 python-data-ai §4.6 允许进程内全局复用，
 在 lifespan 启动时初始化、关闭时释放。后台 worker 无 Request 上下文，通过
@@ -27,7 +27,7 @@ def init_engine(settings: Settings) -> AsyncEngine:
     """创建异步引擎与会话工厂（lifespan 启动时调用一次）。
 
     通过 asyncpg `server_settings.search_path` 把会话默认 schema 固定为
-    omnimind_ai，配合 ORM metadata 的 schema，确保不触碰 omnimind_biz。
+    settings.database_schema（public），与 ORM metadata 的 schema 保持一致。
     """
     global _engine, _session_factory
     if _engine is not None:

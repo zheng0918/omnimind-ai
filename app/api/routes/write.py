@@ -47,16 +47,30 @@ async def get_write(write_task_id: int, session: SessionDep) -> dict[str, Any]:
     return ok(status)
 
 
-@router.get("/{write_task_id}/stream")
-async def stream_write(write_task_id: int, clients: ClientsDep) -> StreamingResponse:
-    """SSE 流式生成章节正文（progress/token/done/error）。"""
-    events = write_service.stream_write(
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+@router.get("/{write_task_id}/outline/stream")
+async def stream_outline(write_task_id: int, clients: ClientsDep) -> StreamingResponse:
+    """SSE 大纲流（契约 §1.6）：progress* → token{node}* → done{totalNodes,matchedMaterials}。"""
+    events = write_service.stream_outline(
         clients, get_settings(), write_task_id=write_task_id
     )
     return StreamingResponse(
-        stream_events(events),
-        media_type=SSE_MEDIA_TYPE,
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        stream_events(events), media_type=SSE_MEDIA_TYPE, headers=_SSE_HEADERS
+    )
+
+
+@router.get("/{write_task_id}/sections/{section_id}/stream")
+async def stream_section(
+    write_task_id: int, section_id: int, clients: ClientsDep
+) -> StreamingResponse:
+    """SSE 单章节流（契约 §1.6）：token* → done{sectionId,status}。"""
+    events = write_service.stream_section(
+        clients, get_settings(), write_task_id=write_task_id, section_id=section_id
+    )
+    return StreamingResponse(
+        stream_events(events), media_type=SSE_MEDIA_TYPE, headers=_SSE_HEADERS
     )
 
 

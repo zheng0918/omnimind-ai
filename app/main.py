@@ -70,3 +70,16 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    import uvicorn
+
+    # 直接调试入口（PyCharm Run/Debug main.py）。不开 reload：reload 会另起
+    # 子进程，调试器只附着父进程，断点打不上。不用 uvicorn.run()：新版它内部
+    # 以 loop_factory 调 asyncio.run，与 PyCharm 调试器的 asyncio 补丁不兼容，
+    # 故自建 Server 直接 serve() 绕开该参数。
+    config = uvicorn.Config(app, host="0.0.0.0", port=8100)
+    asyncio.run(uvicorn.Server(config).serve())

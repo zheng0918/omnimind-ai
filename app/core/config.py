@@ -24,9 +24,9 @@ class Settings(BaseSettings):
     app_port: int = 8000
     app_reload: bool = False
 
-    # ---- 数据库（仅 omnimind_ai schema）----
-    database_url: str = "postgresql+asyncpg://ai_rw:placeholder@localhost:5432/omnimind"
-    database_schema: str = "omnimind_ai"
+    # ---- 数据库（独立 omnimind_ai 库，默认 public schema）----
+    database_url: str = "postgresql+asyncpg://ai_rw:placeholder@localhost:5432/omnimind_ai"
+    database_schema: str = "public"
     db_pool_size: int = 20
     db_max_overflow: int = 10
 
@@ -53,12 +53,14 @@ class Settings(BaseSettings):
 
     # ---- 阿里云百炼 ----
     dashscope_api_key: str = "placeholder"
-    dashscope_embed_model: str = "text-embedding-v3"
-    dashscope_rerank_model: str = "gte-rerank"
+    dashscope_embed_model: str = "text-embedding-v4"
+    dashscope_rerank_model: str = "qwen3-rerank"
     dashscope_timeout_s: int = 30
-    embed_dim: int = 1024
+    embed_dim: int = 2048
     embed_batch_size: int = 25  # 百炼单批硬上限 25 段
     embed_concurrency: int = 5
+    # 写入向量的版本标记；新旧模型并存/灰度/回滚的依据（检索按此过滤）。
+    embedding_version: str = "text-embedding-v4"
 
     # ---- Agent 并发与超时 ----
     review_parallel: int = 10

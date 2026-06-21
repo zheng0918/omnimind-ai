@@ -48,8 +48,12 @@ async def hybrid_retrieve(
     *,
     query: str,
     kb_ids: list[int],
+    doc_ids: list[int] | None = None,
 ) -> list[RetrievedBlock]:
-    """执行混合检索，返回 rerank 后的 top-N 父块。"""
+    """执行混合检索，返回 rerank 后的 top-N 父块。
+
+    doc_ids 非空时（契约 §3.2 docRefs），只保留这些文档内的父块。
+    """
     if not kb_ids:
         return []
 
@@ -57,7 +61,10 @@ async def hybrid_retrieve(
     if not vectors:
         return []
     dense_hits = await clients.vector_store.search(
-        vectors[0], top_k=settings.rag_dense_top_k, kb_ids=kb_ids
+        vectors[0],
+        top_k=settings.rag_dense_top_k,
+        kb_ids=kb_ids,
+        embedding_ver=settings.embedding_version,
     )
     dense_ids = [hit.chunk_id for hit in dense_hits]
     lexical_ids = await chunk_repo.lexical_search(
@@ -82,6 +89,9 @@ async def hybrid_retrieve(
 
     parents = await chunk_repo.get_parent_texts(session, parent_order)
     candidates = [parents[pid] for pid in parent_order if pid in parents]
+    if doc_ids:
+        allowed = set(doc_ids)
+        candidates = [c for c in candidates if c.document_id in allowed]
     if not candidates:
         return []
 

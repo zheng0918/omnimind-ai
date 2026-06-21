@@ -12,11 +12,13 @@ import time
 from collections.abc import AsyncIterator
 
 from loguru import logger
+from openai import APITimeoutError
 
 from app.clients.registry import Clients
 from app.core.config import Settings
 from app.core.db import session_scope
 from app.core.errors import (
+    CODE_LLM_TIMEOUT,
     CODE_RAG_RETRIEVE_FAILED,
     CODE_RAG_SCOPE_EMPTY,
     BizError,
@@ -86,12 +88,16 @@ async def _rewrite_query(
 
 
 async def _retrieve(
-    clients: Clients, settings: Settings, query: str, kb_ids: list[int]
+    clients: Clients,
+    settings: Settings,
+    query: str,
+    kb_ids: list[int],
+    doc_ids: list[int] | None = None,
 ) -> list[RetrievedBlock]:
     """短事务内完成混合检索，随后立即释放连接。"""
     async with session_scope() as session:
         return await hybrid_retrieve(
-            session, clients, settings, query=query, kb_ids=kb_ids
+            session, clients, settings, query=query, kb_ids=kb_ids, doc_ids=doc_ids
         )
 
 
@@ -103,12 +109,13 @@ async def stream_answer(
     kb_ids: list[int],
     history: list[ChatMessage],
     creative: bool = False,
+    doc_ids: list[int] | None = None,
 ) -> AsyncIterator[SSEEvent]:
     """产出问答 SSE 事件流。token* → citation → done；异常以 error 事件收尾。"""
     started = time.monotonic()
     try:
         rewritten = await _rewrite_query(clients, history, query)
-        blocks = await _retrieve(clients, settings, rewritten, kb_ids)
+        blocks = await _retrieve(clients, settings, rewritten, kb_ids, doc_ids)
     except BizError as exc:
         yield ErrorEvent(code=exc.code, message=exc.message)
         return
@@ -135,6 +142,10 @@ async def stream_answer(
             safe = sanitizer.feed(delta)
             if safe:
                 yield TokenEvent(text=safe)
+    except APITimeoutError:
+        logger.warning("llm stream timeout")
+        yield ErrorEvent(code=CODE_LLM_TIMEOUT, message="AI 响应超时，请稍后重试")
+        return
     except Exception:
         logger.exception("llm stream failed")
         yield ErrorEvent(code=CODE_RAG_RETRIEVE_FAILED, message="生成失败，请稍后重试")
