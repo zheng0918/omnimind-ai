@@ -78,6 +78,8 @@ class ReviewRiskOut(CamelModel):
     source_page: int | None = None
     source_para_id: str | None = None
     confidence: float | None = None
+    # 归一化版面包围盒 [x0,y0,x1,y1]（0~1，左上原点），供前端在原文 PDF 上画高亮框；无则 None。
+    bbox: list[float] | None = None
     disposition: Disposition = Disposition.PENDING
     related_cases: list[str] = Field(default_factory=list)
 

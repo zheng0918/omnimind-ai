@@ -32,6 +32,7 @@ from app.schemas.sse_events import (
     CitationEvent,
     DoneEvent,
     ErrorEvent,
+    ProgressEvent,
     TokenEvent,
 )
 from app.utils.text import StreamingDesensitizer
@@ -83,7 +84,7 @@ async def _rewrite_query(
         rewritten = (await clients.llm.chat(messages, temperature=0.0)).strip()
         return rewritten or query
     except Exception:
-        logger.warning("query rewrite failed, fallback to original")
+        logger.error("query rewrite failed, fallback to original")
         return query
 
 
@@ -113,6 +114,16 @@ async def stream_answer(
 ) -> AsyncIterator[SSEEvent]:
     """产出问答 SSE 事件流。token* → citation → done；异常以 error 事件收尾。"""
     started = time.monotonic()
+    logger.info(
+        "rag answer start kb_ids={} doc_ids={} creative={} history_rounds={}",
+        kb_ids,
+        doc_ids,
+        creative,
+        len(history) // 2,
+    )
+    # 首 token 前需先做 query 改写（仅多轮）+ 混合检索，期间无 token 可发，
+    # 前端只见空白「正在生成」。先发一个 progress 事件给出阶段反馈，消除"卡死"观感。
+    yield ProgressEvent(stage="retrieving", percent=0)
     try:
         rewritten = await _rewrite_query(clients, history, query)
         blocks = await _retrieve(clients, settings, rewritten, kb_ids, doc_ids)
@@ -127,6 +138,9 @@ async def stream_answer(
     if not blocks:
         yield ErrorEvent(code=CODE_RAG_SCOPE_EMPTY, message="未检索到相关资料")
         return
+
+    # 检索完成、即将进入 LLM 流式生成；再发一个 progress 标记阶段切换。
+    yield ProgressEvent(stage="generating", percent=50)
 
     messages = v1.build_qa_messages(
         blocks, history, query, context_token_limit=settings.rag_context_token_limit
@@ -143,7 +157,7 @@ async def stream_answer(
             if safe:
                 yield TokenEvent(text=safe)
     except APITimeoutError:
-        logger.warning("llm stream timeout")
+        logger.error("llm stream timeout")
         yield ErrorEvent(code=CODE_LLM_TIMEOUT, message="AI 响应超时，请稍后重试")
         return
     except Exception:
@@ -156,9 +170,18 @@ async def stream_answer(
         yield TokenEvent(text=tail)
 
     answer = sanitizer.full_text
-    yield CitationEvent(citations=_build_citations(answer, blocks))
+    citations = _build_citations(answer, blocks)
+    total_ms = int((time.monotonic() - started) * 1000)
+    yield CitationEvent(citations=citations)
     yield DoneEvent(
         filtered_count=len(blocks),
         first_token_ms=first_token_ms,
-        total_ms=int((time.monotonic() - started) * 1000),
+        total_ms=total_ms,
+    )
+    logger.info(
+        "rag answer done blocks={} citations={} first_token_ms={} total_ms={}",
+        len(blocks),
+        len(citations),
+        first_token_ms,
+        total_ms,
     )

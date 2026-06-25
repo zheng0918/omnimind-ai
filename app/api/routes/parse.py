@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks
+from loguru import logger
 
 from app.api.deps import ClientsDep, SessionDep, ok
 from app.core.errors import CODE_RESOURCE_NOT_FOUND, BizError
@@ -27,6 +28,7 @@ async def submit_parse(
     result = await parse_service.submit_parse(session, payload)
     # 后台任务在响应返回后执行；此时请求会话已提交，任务记录可见。
     background_tasks.add_task(run_parse, result.parse_task_id, clients, get_trace_id())
+    logger.info("parse task scheduled task={} document={}", result.parse_task_id, payload.document_id)
     return ok(result)
 
 
@@ -37,3 +39,12 @@ async def get_parse_status(parse_task_id: int, session: SessionDep) -> dict[str,
     if status is None:
         raise BizError(CODE_RESOURCE_NOT_FOUND, "解析任务不存在")
     return ok(status)
+
+
+@router.put("/{document_id}/cleanup")
+async def cleanup_document(
+    document_id: int, session: SessionDep, clients: ClientsDep
+) -> dict[str, Any]:
+    """文档删除联动：清理 chunks 与 Milvus 向量（Java 删除文档时调用）。"""
+    result = await parse_service.cleanup(session, clients, document_id)
+    return ok(result)

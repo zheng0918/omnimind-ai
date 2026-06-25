@@ -86,6 +86,12 @@ class WriteAgent:
                 await write_repo.update_task(
                     session, task, status="GENERATING", total_sections=total
                 )
+        logger.info(
+            "write prepare done task={} score_points={} sections={}",
+            write_task_id,
+            len(point_texts),
+            total,
+        )
 
     async def _extract_score_points(
         self, write_task_id: int, tender_text: str
@@ -94,7 +100,7 @@ class WriteAgent:
             messages = v1.build_score_point_extract_messages(tender_text)
             result = await self._clients.llm.json_mode(messages, temperature=0.0)
         except Exception:
-            logger.warning("score point extract failed task={}", write_task_id)
+            logger.error("score point extract failed task={}", write_task_id)
             result = {}
         texts: list[str] = []
         async with session_scope() as session:
@@ -126,7 +132,7 @@ class WriteAgent:
             messages = v1.build_outline_messages(point_texts, materials)
             result = await self._clients.llm.json_mode(messages, temperature=0.0)
         except Exception:
-            logger.warning("outline build failed, using fallback")
+            logger.error("outline build failed, using fallback")
             result = {}
         outline: list[tuple[str, list[str]]] = []
         for raw in result.get("outline", []):
@@ -217,6 +223,12 @@ class WriteAgent:
                 )
             )
         yield OutlineDoneEvent(total_nodes=len(nodes), matched_materials=point_count)
+        logger.info(
+            "write outline streamed task={} nodes={} score_points={}",
+            write_task_id,
+            len(nodes),
+            point_count,
+        )
 
     async def _load_outline_snapshot(
         self, write_task_id: int
@@ -251,6 +263,9 @@ class WriteAgent:
         if errored:
             return
         await self._finalize(write_task_id)
+        logger.info(
+            "write section streamed task={} section={}", write_task_id, section_id
+        )
         yield SectionDoneEvent(section_id=section_id, status="DONE")
 
     async def _load_section_context(

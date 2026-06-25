@@ -30,6 +30,7 @@ async def run_parse(parse_task_id: int, clients: Clients, trace_id: str) -> None
     trace_id_ctx.set(trace_id)
     settings = get_settings()
     document_id: int | None = None
+    logger.info("parse worker start task={}", parse_task_id)
     try:
         async with session_scope() as session:
             task = await parse_task_repo.get(session, parse_task_id)
@@ -43,7 +44,7 @@ async def run_parse(parse_task_id: int, clients: Clients, trace_id: str) -> None
             await parse_task_repo.update_progress(session, task, status="PARSING", progress=10)
 
         data = await clients.minio.get_object_bytes(minio_key)
-        parsed = await _parse_with_retry(mime_type, data)
+        parsed = await _parse_with_retry(mime_type, data, minio_key)
 
         async with session_scope() as session:
             task = await parse_task_repo.get(session, parse_task_id)
@@ -78,15 +79,41 @@ async def run_parse(parse_task_id: int, clients: Clients, trace_id: str) -> None
         await _handle_failure(parse_task_id, document_id, clients, exc)
 
 
-async def _parse_with_retry(mime_type: str, data: bytes) -> ParsedDocument:
-    parser = get_parser(mime_type)
+async def recover_unfinished_parses(clients: Clients) -> None:
+    """启动时重跑孤儿解析任务（PENDING/PARSING）。
+
+    BackgroundTasks 进程内调度、重启即丢，故重启后这些任务会永久卡住。
+    在此扫描并顺序重跑（run_parse 已幂等：先清旧块/旧向量再入库）。
+    顺序执行以免一次性占满 embedding/Milvus 配额。
+    """
+    trace_id = trace_id_ctx.get() or "recover"
+    try:
+        async with session_scope() as session:
+            tasks = await parse_task_repo.list_unfinished(session)
+            task_ids = [t.id for t in tasks]
+    except Exception:
+        logger.exception("scan unfinished parse tasks failed")
+        return
+    if not task_ids:
+        logger.info("no unfinished parse tasks to recover")
+        return
+    logger.info("recovering {} unfinished parse tasks: {}", len(task_ids), task_ids)
+    for task_id in task_ids:
+        try:
+            await run_parse(task_id, clients, trace_id)
+        except Exception:
+            logger.exception("recover parse task failed id={}", task_id)
+
+
+async def _parse_with_retry(mime_type: str, data: bytes, key: str) -> ParsedDocument:
+    parser = get_parser(mime_type, key)
     last_exc: Exception | None = None
     for attempt in range(_PARSE_MAX_ATTEMPTS):
         try:
             return await parser.parse(data)
         except ParseError as exc:
             last_exc = exc
-            logger.warning("parse attempt {} failed: {}", attempt + 1, exc.message)
+            logger.error("parse attempt {} failed: {}", attempt + 1, exc.message)
     raise last_exc if last_exc is not None else ParseError(CODE_PARSE_FAILED, "解析失败")
 
 
@@ -98,6 +125,13 @@ async def _persist_and_index(
     kb_id: int,
     parsed: ParsedDocument,
 ) -> list[Chunk]:
+    # 重入幂等：先清旧块（PG）与旧向量（Milvus），避免重试/恢复重复入库。
+    # 首次解析时文档尚无块，删除为空操作，安全。
+    await chunk_repo.delete_by_document(session, document_id)
+    try:
+        await clients.vector_store.delete_by_doc(document_id)
+    except Exception as exc:
+        logger.error("clear old vectors failed doc={} type={}", document_id, type(exc).__name__)
     parents = chunk_document(
         parsed.paragraphs,
         parent_tokens=settings.chunk_parent_tokens,

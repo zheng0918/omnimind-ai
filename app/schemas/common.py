@@ -41,3 +41,20 @@ class PageResult(CamelModel, Generic[T]):
     total: int
     page: int
     page_size: int
+
+
+class ExportIn(CamelModel):
+    """导出入参：格式 docx|pdf（审查报告 / 编写初稿共用）。"""
+
+    format: str = "docx"
+
+
+class ExportFileOut(CamelModel):
+    """导出文件出参。
+
+    Python 只读 MinIO，故仅返回文件字节（base64）+ 元信息，由 Java 解码落桶并预签名下载。
+    """
+
+    filename: str
+    content_type: str
+    content_base64: str

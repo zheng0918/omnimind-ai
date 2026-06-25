@@ -118,6 +118,12 @@ class ReviewAgent:
                 await review_repo.update_task(
                     session, task, total_items=len(items), status="RUNNING"
                 )
+        logger.info(
+            "review extract done task={} total_items={} resume_from={}",
+            state["review_task_id"],
+            len(items),
+            state["resume_from"],
+        )
         return {"items": items}
 
     async def _extract_from_tender(self, tender_doc_id: int) -> list[ChecklistItem]:
@@ -128,7 +134,7 @@ class ReviewAgent:
             messages = v1.build_checklist_extract_messages(tender_text)
             result = await self._clients.llm.json_mode(messages, temperature=0.0)
         except Exception:
-            logger.warning("checklist extract failed, builtin only")
+            logger.error("checklist extract failed, builtin only")
             return []
         extracted: list[ChecklistItem] = []
         for idx, raw in enumerate(result.get("items", [])[:_EXTRACT_MAX_ITEMS]):
@@ -168,7 +174,7 @@ class ReviewAgent:
                 timeout=self._settings.agent_step_timeout_s,
             )
         except Exception:
-            logger.warning("judge item failed after retries id={}", item.id)
+            logger.error("judge item failed after retries id={}", item.id)
             judgement = {
                 "severity": "PASS",
                 "risk_type": item.risk_type,
@@ -177,6 +183,7 @@ class ReviewAgent:
                 "confidence": 0.0,
                 "page": None,
                 "para_id": None,
+                "bbox": None,
             }
         await self._save(state, judgement, total)
 
@@ -185,12 +192,15 @@ class ReviewAgent:
         self, state: ReviewState, item: ChecklistItem
     ) -> dict[str, Any]:
         async with session_scope() as session:
+            # 限定检索范围为被审文档本身：审查判定的是该投标文件是否满足要求，
+            # 证据须取自 target 文档，避免召回库内其它文档导致误判与错误溯源页码。
             blocks = await hybrid_retrieve(
                 session,
                 self._clients,
                 self._settings,
                 query=item.requirement,
                 kb_ids=[state["kb_id"]],
+                doc_ids=[state["target_doc_id"]],
             )
         evidence = "\n\n".join(b.text for b in blocks[:_EVIDENCE_BLOCKS])
         messages = v1.build_risk_judge_messages(item.title, item.requirement, evidence)
@@ -220,6 +230,7 @@ class ReviewAgent:
             "confidence": confidence,
             "page": top.page if top else None,
             "para_id": top.paragraph_id if top else None,
+            "bbox": top.bbox if top else None,
         }
 
     async def _save(
@@ -238,6 +249,7 @@ class ReviewAgent:
                 source_page=judgement.get("page"),
                 source_para_id=judgement.get("para_id"),
                 confidence=judgement.get("confidence"),
+                bbox=judgement.get("bbox"),
                 related_cases=None,
                 ai_model=self._model,
                 prompt_ver=v1.PROMPT_VERSION,
@@ -251,4 +263,5 @@ class ReviewAgent:
                 await review_repo.update_task(
                     session, task, status="DONE", progress=100
                 )
+        logger.info("review finalize done task={}", state["review_task_id"])
         return {}

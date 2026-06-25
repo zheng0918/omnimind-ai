@@ -9,10 +9,12 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Query
+from loguru import logger
 
 from app.api.deps import ClientsDep, SessionDep, ok
 from app.core.errors import CODE_RESOURCE_NOT_FOUND, BizError
 from app.core.trace import get_trace_id
+from app.schemas.common import ExportIn
 from app.schemas.review import ReviewCreateIn, RiskDispositionIn
 from app.services import review_service
 from app.workers.review_worker import run_review
@@ -32,6 +34,7 @@ async def create_review(
     background_tasks.add_task(
         run_review, result.review_task_id, clients, get_trace_id()
     )
+    logger.info("review task scheduled task={}", result.review_task_id)
     return ok(result)
 
 
@@ -61,4 +64,13 @@ async def dispose_risk(
 ) -> dict[str, Any]:
     """更新单条风险处置。"""
     result = await review_service.dispose_risk(session, risk_id, payload)
+    return ok(result)
+
+
+@router.post("/{review_task_id}/export")
+async def export_review(
+    review_task_id: int, payload: ExportIn, session: SessionDep
+) -> dict[str, Any]:
+    """导出审查报告为 docx/pdf 文件（base64），由 Java 落桶 + 预签名下载（契约 §1.5）。"""
+    result = await review_service.export(session, review_task_id, payload.format)
     return ok(result)

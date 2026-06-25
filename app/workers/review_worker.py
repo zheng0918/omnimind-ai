@@ -20,6 +20,7 @@ async def run_review(review_task_id: int, clients: Clients, trace_id: str) -> No
     """执行审查全链路。"""
     trace_id_ctx.set(trace_id)
     settings = get_settings()
+    logger.info("review worker start task={}", review_task_id)
     try:
         async with session_scope() as session:
             task = await review_repo.get_task(session, review_task_id)

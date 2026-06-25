@@ -84,6 +84,15 @@ class SectionSaveIn(CamelModel):
     content_md: str
 
 
+class WriteSectionOut(CamelModel):
+    """GET /ai/v1/write/{id}/sections/{sid} 出参：章节正文 + 状态（供编辑器加载）。"""
+
+    section_id: int
+    title: str | None = None
+    content_md: str | None = None
+    status: SectionStatus
+
+
 class ScorePointResponse(CamelModel):
     point_id: int
     response_status: ResponseStatus

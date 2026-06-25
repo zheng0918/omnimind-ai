@@ -46,6 +46,19 @@ async def get_by_document(session: AsyncSession, document_id: int) -> ParseTask 
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def list_unfinished(session: AsyncSession) -> list[ParseTask]:
+    """取所有未完成的解析任务（PENDING/PARSING）。
+
+    BackgroundTasks 为进程内、重启即丢；启动时凡 PENDING/PARSING 皆为孤儿，需重新入队。
+    """
+    stmt = (
+        select(ParseTask)
+        .where(ParseTask.status.in_(("PENDING", "PARSING")))
+        .order_by(ParseTask.id.asc())
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
 async def update_progress(
     session: AsyncSession,
     task: ParseTask,

@@ -44,12 +44,15 @@ def create_app() -> FastAPI:
         status_code = 500 if exc.code >= 9000 else 200
         if status_code == 500:
             logger.error("biz error code={} msg={}", exc.code, exc.message)
+        else:
+            logger.info("biz outcome code={} msg={}", exc.code, exc.message)
         return JSONResponse(status_code=status_code, content=_error_body(exc.code, exc.message))
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(
         _: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        logger.error("request validation failed: {}", exc.errors())
         return JSONResponse(
             status_code=422,
             content=_error_body(1001, f"参数校验失败：{exc.errors()[0].get('msg', '')}"),

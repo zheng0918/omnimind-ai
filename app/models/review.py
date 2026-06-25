@@ -62,6 +62,8 @@ class ReviewRisk(Base, IdMixin, TimestampMixin):
     source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_para_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 归一化版面包围盒 [x0,y0,x1,y1]（0~1，左上原点），供前端在原文 PDF 上画精确高亮框。
+    bbox: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     disposition: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default=text("'PENDING'")
     )

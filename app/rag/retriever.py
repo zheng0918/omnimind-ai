@@ -7,9 +7,11 @@
 
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.registry import Clients
@@ -27,6 +29,8 @@ class RetrievedBlock:
     paragraph_id: str | None
     text: str
     score: float
+    # 归一化版面包围盒（来自父块 metadata.bbox），供风险溯源高亮；无则 None。
+    bbox: list[float] | None = None
 
 
 def rrf_fuse(ranked_lists: list[list[int]], *, k: int) -> list[int]:
@@ -57,6 +61,7 @@ async def hybrid_retrieve(
     if not kb_ids:
         return []
 
+    started = time.monotonic()
     vectors = await clients.embedder.embed([query])
     if not vectors:
         return []
@@ -98,6 +103,16 @@ async def hybrid_retrieve(
     hits = await clients.reranker.rerank(
         query, [c.text for c in candidates], settings.rag_rerank_top_n
     )
+    logger.info(
+        "retrieve done kb_ids={} doc_ids={} dense={} lexical={} candidates={} reranked={} cost_ms={}",
+        kb_ids,
+        doc_ids,
+        len(dense_ids),
+        len(lexical_ids),
+        len(candidates),
+        len(hits),
+        int((time.monotonic() - started) * 1000),
+    )
     return [
         RetrievedBlock(
             parent_id=candidates[hit.index].id,
@@ -106,6 +121,7 @@ async def hybrid_retrieve(
             paragraph_id=candidates[hit.index].paragraph_id,
             text=candidates[hit.index].text,
             score=hit.score,
+            bbox=(candidates[hit.index].meta or {}).get("bbox"),
         )
         for hit in hits
     ]

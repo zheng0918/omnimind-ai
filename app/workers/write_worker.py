@@ -21,6 +21,7 @@ async def run_write_prepare(write_task_id: int, clients: Clients, trace_id: str)
     """执行评分点抽取与大纲规划。"""
     trace_id_ctx.set(trace_id)
     settings = get_settings()
+    logger.info("write prepare worker start task={}", write_task_id)
     try:
         async with session_scope() as session:
             task = await write_repo.get_task(session, write_task_id)

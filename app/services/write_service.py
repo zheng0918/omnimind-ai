@@ -6,17 +6,21 @@ create 落库 EXTRACTING 任务并立即返回，准备（评分点+大纲）交
 
 from __future__ import annotations
 
+import base64
 from collections.abc import AsyncIterator
 
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.write_agent import WriteAgent
 from app.clients.registry import Clients
 from app.core.config import Settings
 from app.core.errors import CODE_RESOURCE_NOT_FOUND, BizError
+from app.infra import report
 from app.infra.sse import SSEEvent
 from app.prompts import v1
 from app.repositories import write_repo
+from app.schemas.common import ExportFileOut
 from app.schemas.write import (
     CheckResponseOut,
     DraftExportOut,
@@ -24,8 +28,10 @@ from app.schemas.write import (
     ScorePointOut,
     ScorePointResponse,
     SectionSaveIn,
+    SectionStatus,
     WriteCreateIn,
     WriteCreateOut,
+    WriteSectionOut,
     WriteStatus,
     WriteStatusOut,
 )
@@ -42,6 +48,13 @@ async def create_write(session: AsyncSession, payload: WriteCreateIn) -> WriteCr
         tender_doc_id=payload.tender_doc_id,
         use_history=payload.use_history,
         project_params=payload.project_params.model_dump(),
+    )
+    logger.info(
+        "write task created task={} java_task_id={} kb={} tender_doc={}",
+        task.id,
+        payload.java_task_id,
+        payload.kb_id,
+        payload.tender_doc_id,
     )
     return WriteCreateOut(write_task_id=task.id, status=WriteStatus.EXTRACTING)
 
@@ -95,6 +108,28 @@ async def save_section(
     await write_repo.update_section(
         session, section, content_md=payload.content_md, status="USER_EDITED"
     )
+    logger.info("write section saved task={} section={}", write_task_id, section_id)
+
+
+async def get_section(
+    session: AsyncSession, write_task_id: int, section_id: int
+) -> WriteSectionOut:
+    """读取单章节正文与状态（供编辑器加载）；标题取自关联大纲节点。"""
+    section = await write_repo.get_section(session, section_id)
+    if section is None or section.write_task_id != write_task_id:
+        raise BizError(CODE_RESOURCE_NOT_FOUND, "小节不存在")
+    title: str | None = None
+    if section.outline_node_id is not None:
+        for node in await write_repo.list_outline(session, write_task_id):
+            if node.id == section.outline_node_id:
+                title = node.title
+                break
+    return WriteSectionOut(
+        section_id=section.id,
+        title=title,
+        content_md=section.content_md,
+        status=SectionStatus(section.status),
+    )
 
 
 def _assemble_draft(outline: list, sections_by_id: dict) -> str:
@@ -118,8 +153,29 @@ async def export_draft(session: AsyncSession, write_task_id: int) -> DraftExport
         raise BizError(CODE_RESOURCE_NOT_FOUND, "编写任务不存在")
     outline = await write_repo.list_outline(session, write_task_id)
     sections = {s.id: s for s in await write_repo.list_sections(session, write_task_id)}
+    logger.info(
+        "write draft exported task={} nodes={} sections={}",
+        write_task_id,
+        len(outline),
+        len(sections),
+    )
     return DraftExportOut(
         write_task_id=write_task_id, content_md=_assemble_draft(outline, sections)
+    )
+
+
+async def export_file(
+    session: AsyncSession, write_task_id: int, fmt: str
+) -> ExportFileOut:
+    """导出初稿为 docx/pdf 字节（base64），由 Java 落桶 + 预签名（契约 §1.6）。"""
+    draft = await export_draft(session, write_task_id)
+    blocks = report.markdown_to_blocks(draft.content_md)
+    data, content_type, ext = report.render("投标文件初稿", blocks, fmt)
+    logger.info("write draft file exported task={} fmt={}", write_task_id, fmt)
+    return ExportFileOut(
+        filename=f"投标初稿-{write_task_id}.{ext}",
+        content_type=content_type,
+        content_base64=base64.b64encode(data).decode("ascii"),
     )
 
 
@@ -132,8 +188,10 @@ async def check_response(
         raise BizError(CODE_RESOURCE_NOT_FOUND, "编写任务不存在")
     points = await write_repo.list_score_points(session, write_task_id)
     if not points:
+        logger.info("write check-response skipped task={} points=0", write_task_id)
         return CheckResponseOut(score_points=[])
 
+    logger.info("write check-response start task={} points={}", write_task_id, len(points))
     outline = await write_repo.list_outline(session, write_task_id)
     sections = {s.id: s for s in await write_repo.list_sections(session, write_task_id)}
     draft = _assemble_draft(outline, sections)
@@ -144,6 +202,9 @@ async def check_response(
         status = statuses.get(idx, ResponseStatus.NONE)
         await write_repo.set_score_point_response(session, point, status.value)
         results.append(ScorePointResponse(point_id=point.id, response_status=status))
+    logger.info(
+        "write check-response done task={} judged={}", write_task_id, len(statuses)
+    )
     return CheckResponseOut(score_points=results)
 
 
@@ -155,6 +216,7 @@ async def _judge_responses(
         messages = v1.build_response_check_messages(point_texts, draft)
         result = await clients.llm.json_mode(messages, temperature=0.0)
     except Exception:
+        logger.exception("response check llm call failed")
         return {}
     statuses: dict[int, ResponseStatus] = {}
     for raw in result.get("results", []):

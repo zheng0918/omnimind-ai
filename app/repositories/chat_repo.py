@@ -61,6 +61,45 @@ async def add_message(
     return row
 
 
+async def set_feedback(
+    session: AsyncSession,
+    message_id: int,
+    feedback: str | None,
+    *,
+    owner_id: int | None = None,
+) -> str:
+    """更新消息反馈（up/down/None）。
+
+    返回状态：``ok`` 成功 / ``not_found`` 消息不存在 / ``forbidden`` 非本人会话消息。
+    owner_id 不为空时校验消息所属会话归属，防越权点赞他人消息（IDOR）。
+    """
+    msg = await session.get(ChatMessage, message_id)
+    if msg is None:
+        return "not_found"
+    if owner_id is not None:
+        sess = await session.get(ChatSession, msg.session_id)
+        if sess is None or sess.owner_id != owner_id:
+            return "forbidden"
+    msg.feedback = feedback
+    return "ok"
+
+
+async def delete_session(
+    session: AsyncSession, session_id: int, *, owner_id: int | None = None
+) -> bool:
+    """删除会话及其消息（FK ondelete CASCADE 级联）。
+
+    会话不存在或非本人时返回 False（幂等：上游据此返回成功，不抛错）。
+    """
+    row = await session.get(ChatSession, session_id)
+    if row is None:
+        return False
+    if owner_id is not None and row.owner_id != owner_id:
+        return False
+    await session.delete(row)
+    return True
+
+
 async def recent_messages(
     session: AsyncSession, session_id: int, limit: int
 ) -> list[ChatMessage]:

@@ -51,7 +51,7 @@ async def connect_clients(clients: Clients) -> None:
         logger.info("milvus connected")
     except Exception as exc:
         # 启动期容错：记录后继续，调用时再抛 ExternalServiceError。
-        logger.warning("milvus connect failed (deferred): {}", type(exc).__name__)
+        logger.error("milvus connect failed (deferred): {}", type(exc).__name__)
 
 
 async def close_clients(clients: Clients) -> None:
@@ -59,4 +59,4 @@ async def close_clients(clients: Clients) -> None:
     try:
         await clients.vector_store.close()
     except Exception as exc:
-        logger.warning("milvus close failed: {}", type(exc).__name__)
+        logger.error("milvus close failed: {}", type(exc).__name__)

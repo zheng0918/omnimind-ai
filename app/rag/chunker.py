@@ -30,6 +30,8 @@ class ParentChunk:
     page: int | None
     paragraph_id: str
     char_offset: int
+    # 取自首段（锚段）的归一化包围盒，用于风险溯源时在原文 PDF 上画高亮框。
+    bbox: list[float] | None = None
     children: list[ChildChunk] = field(default_factory=list)
 
 
@@ -69,6 +71,7 @@ def _build_parents(
                 page=anchor.page,
                 paragraph_id=anchor.paragraph_id,
                 char_offset=anchor.char_offset,
+                bbox=anchor.bbox,
             )
         )
         buf = []

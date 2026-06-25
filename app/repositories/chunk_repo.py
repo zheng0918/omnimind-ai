@@ -33,6 +33,8 @@ async def persist_chunks(
             paragraph_id=parent.paragraph_id,
             char_offset=parent.char_offset,
             tokens=parent.tokens,
+            # 版面坐标存 metadata（无需为可空溯源信息单开列）；检索回填时读出供风险高亮。
+            meta={"bbox": parent.bbox} if parent.bbox is not None else {},
         )
         session.add(parent_row)
         await session.flush()

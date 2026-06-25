@@ -84,6 +84,7 @@ async def add_risk(
     related_cases: list[Any] | None,
     ai_model: str | None,
     prompt_ver: str | None,
+    bbox: list[float] | None = None,
 ) -> ReviewRisk:
     """写入一条风险并 flush。"""
     risk = ReviewRisk(
@@ -97,6 +98,7 @@ async def add_risk(
         source_page=source_page,
         source_para_id=source_para_id,
         confidence=confidence,
+        bbox=bbox,
         related_cases=related_cases,
         ai_model=ai_model,
         prompt_ver=prompt_ver,

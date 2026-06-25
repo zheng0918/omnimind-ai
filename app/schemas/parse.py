@@ -49,6 +49,9 @@ class ParsedParagraph(CamelModel):
     page: int | None = None
     paragraph_id: str
     char_offset: int
+    # 段落在页面上的归一化包围盒 [x0,y0,x1,y1]（0~1，左上原点），供前端在原文 PDF 上画精确高亮框；
+    # 仅可定位的解析器（如 PDF）产出，docx/xlsx 等无版面坐标则为 None。
+    bbox: list[float] | None = None
 
 
 class ParsedDocument(CamelModel):
